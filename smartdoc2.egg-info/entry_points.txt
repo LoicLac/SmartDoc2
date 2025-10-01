@@ -1,0 +1,2 @@
+[console_scripts]
+smartdoc = smartdoc.cli:main

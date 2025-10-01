@@ -1,0 +1,144 @@
+# SmartDoc2 Integration Rules
+
+## Overview
+SmartDoc2 is a LlamaIndex-powered documentation system that indexes PDFs, GitHub repositories, and web pages into a persistent ChromaDB vector database. It features intelligent schematic analysis using Gemini Vision.
+
+## Available Commands
+
+The user can invoke SmartDoc2 using natural language. When you detect these requests, translate them into the appropriate CLI commands:
+
+### Indexing Commands
+- "Index this PDF: [path]" → `smartdoc index-pdf [path]`
+- "Index the datasheet at [path]" → `smartdoc index-pdf [path]`
+- "Fetch the [library] from GitHub" → `smartdoc fetch-repo [github_url]`
+- "Index [GitHub URL]" → `smartdoc fetch-repo [github_url]`
+- "Scrape [URL]" → `smartdoc web [url]`
+- "Index this Arduino documentation: [URL]" → `smartdoc web [url]`
+
+### Query Commands
+- "Search docs: [query]" → `smartdoc query "[query]"`
+- "What are the [technical question]?" → `smartdoc query "[question]"`
+- "Find information about [topic]" → `smartdoc query "[topic]"`
+- "Look up [topic] with reprocessing" → `smartdoc query "[topic]" --reprocess`
+
+### Management Commands
+- "List indexed sources" → `smartdoc list-sources`
+- "Show database stats" → `smartdoc stats`
+- "Remove [source]" → `smartdoc remove [source]`
+
+## Integration Guidelines
+
+### When User Asks Technical Questions
+
+1. **Check SmartDoc first** before using general knowledge
+2. Use: `smartdoc query "[user_question]"` 
+3. If confidence < 0.6 and query involves schematics/pinouts, suggest: `smartdoc query "[question]" --reprocess`
+4. Always cite sources in your response using the format returned by SmartDoc
+
+### Response Format
+
+When answering from SmartDoc results:
+```
+According to [nano_r4.pdf, p.23]: 
+SPI pins on Arduino Nano R4:
+- MOSI: D11
+- MISO: D12
+- SCK: D13
+- CS: D10
+
+Source: Arduino Nano R4 Datasheet, page 23
+```
+
+### Confidence-Based Actions
+
+- **Confidence > 0.8**: Provide answer directly with citations
+- **Confidence 0.6-0.8**: Provide answer but note: "Medium confidence - you may want to verify"
+- **Confidence < 0.6**: Suggest reprocessing with `--reprocess` flag or indexing additional sources
+
+### Schematic/Pinout Queries
+
+For queries about:
+- Pin configurations (SPI, I2C, UART, GPIO)
+- Schematic diagrams
+- Wiring and connections
+- Voltage levels and power
+
+Always use `--reprocess` flag: `smartdoc query "[question]" --reprocess`
+
+This triggers Gemini Vision to analyze relevant schematics with the specific query context.
+
+### Source Management
+
+Before indexing, check if source already exists:
+```bash
+smartdoc list-sources
+```
+
+If source needs updating, remove old version first:
+```bash
+smartdoc remove [old_source_path]
+smartdoc index-pdf [new_source_path]
+```
+
+## Examples
+
+### Example 1: PDF Indexing
+**User**: "Index the Arduino Nano R4 datasheet at data/pdfs/nano_r4.pdf"
+
+**Response**: Execute:
+```bash
+smartdoc index-pdf data/pdfs/nano_r4.pdf
+```
+
+### Example 2: Technical Query
+**User**: "What are the SPI pins on the Arduino Nano R4?"
+
+**Response**: Execute:
+```bash
+smartdoc query "SPI pins Arduino Nano R4" --reprocess
+```
+Then provide answer with citations from the results.
+
+### Example 3: GitHub Repository
+**User**: "Fetch the Arduino MIDI library from GitHub"
+
+**Response**: Execute:
+```bash
+smartdoc fetch-repo https://github.com/FortySevenEffects/arduino_midi_library
+```
+
+### Example 4: Code Question
+**User**: "How do I send a MIDI note on message?"
+
+**Response**: Execute:
+```bash
+smartdoc query "MIDI send note on message" --type github
+```
+Then provide code example with citation.
+
+## Workspace-Specific Notes
+
+- PDF folder: `data/pdfs/` - User can drop PDFs here
+- Database: `data/chroma_db/` - Persistent across sessions
+- Registry: `data/registry.db` - Tracks all indexed sources
+
+## Best Practices
+
+1. **Always cite sources** - Include file name and page number for PDFs, file path for code
+2. **Check confidence** - Suggest reprocessing or additional indexing if confidence is low
+3. **Be specific** - For technical queries, use exact terminology from datasheets
+4. **Version awareness** - Note which version/commit of code was indexed
+5. **Datasheet focus** - Prioritize datasheet information for hardware questions
+
+## Error Handling
+
+If SmartDoc command fails:
+1. Check if API keys are configured (LLAMAPARSE_API_KEY, GEMINI_API_KEY)
+2. Verify source path/URL is correct
+3. Check file size limits (warn at 5MB, prompt at 50MB)
+4. Suggest running `smartdoc stats` to check database health
+
+## Integration Status
+
+SmartDoc2 is active and ready to use. The database persists with this workspace, so all indexed documentation remains available across sessions.
+
