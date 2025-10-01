@@ -57,7 +57,7 @@ SUPPORTED_IMAGE_FORMATS = [".png", ".jpg", ".jpeg", ".gif", ".bmp"]
 REGISTRY_DB = str(DATA_DIR / "registry.db")
 
 # Vision Settings
-GEMINI_MODEL = "gemini-1.5-flash"  # Fast and cost-effective for vision
+GEMINI_MODEL = "gemini-2.5-pro"  # Gemini 2.5 Pro (stable, released June 2025)
 GEMINI_TEMPERATURE = 0.1  # Low temperature for technical accuracy
 VISION_MAX_RETRIES = 3
 VISION_CACHE_ENABLED = True

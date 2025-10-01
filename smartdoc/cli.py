@@ -308,6 +308,42 @@ def reset(confirm):
         raise click.Abort()
 
 
+@cli.command()
+@click.option('--root', type=click.Path(exists=True), default=None, help='Root directory to scan (default: parent of current workspace)')
+@click.option('--port', type=int, default=7860, help='Port to run server on')
+@click.option('--share', is_flag=True, help='Create public share link')
+def web_manager(root, port, share):
+    """Launch web-based database manager to view and manage multiple SmartDoc databases."""
+    from pathlib import Path
+    
+    # Determine root path
+    if root:
+        root_path = Path(root).resolve()
+    else:
+        # Default to parent of current workspace (e.g., ~/Code if workspace is ~/Code/SmartDoc2)
+        from .config import BASE_DIR
+        root_path = BASE_DIR.parent
+    
+    console.print(f"[bold blue]🌐 Launching SmartDoc Database Manager[/bold blue]")
+    console.print(f"[bold]Root directory:[/bold] {root_path}")
+    console.print(f"[bold]Server:[/bold] http://localhost:{port}")
+    
+    if not root_path.exists():
+        console.print(f"[bold red]✗ Root directory does not exist:[/bold red] {root_path}")
+        raise click.Abort()
+    
+    try:
+        from .web.ui import launch_ui
+        launch_ui(str(root_path), share=share, server_port=port)
+    except ImportError as e:
+        console.print(f"[bold red]✗ Missing dependency:[/bold red] {e}")
+        console.print("[yellow]Run: pip install gradio[/yellow]")
+        raise click.Abort()
+    except Exception as e:
+        console.print(f"[bold red]✗ Error:[/bold red] {e}")
+        raise click.Abort()
+
+
 def main():
     """Main entry point."""
     cli()

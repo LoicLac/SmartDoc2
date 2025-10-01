@@ -13,6 +13,7 @@ SmartDoc2 enables intelligent ingestion, indexing, and retrieval of technical do
 - 💾 **Persistent Storage**: ChromaDB database that persists with your workspace
 - 📊 **Source Tracking**: SQLite registry tracking all indexed sources with metadata
 - 🎯 **Smart Retrieval**: Confidence-based reprocessing with vision models
+- 🗂️ **Web Manager**: Browser UI to view, delete, and transfer data across multiple workspaces
 
 ## Architecture
 
@@ -88,6 +89,9 @@ smartdoc list sources
 
 # Get statistics
 smartdoc stats
+
+# Launch web-based database manager (view/manage multiple workspaces)
+smartdoc web-manager --root ~/Code
 
 # Reprocess schematic with new query context
 smartdoc reprocess schematic data/pdfs/nano_r4.pdf --page 24
