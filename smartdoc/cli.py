@@ -242,6 +242,106 @@ def stats():
 
 @cli.command()
 @click.argument('source_path')
+def logs(source_path):
+    """View processing logs for a source."""
+    from .core.registry import Registry
+    from .core.chroma_client import ChromaManager
+    from rich.table import Table
+    from rich.panel import Panel
+    
+    try:
+        registry = Registry()
+        
+        # Get source info
+        source = registry.get_source(source_path)
+        if not source:
+            console.print(f"[red]✗ Source not found: {source_path}[/red]")
+            return
+        
+        # Get processing logs
+        logs = registry.get_processing_logs(source_path)
+        
+        if not logs:
+            console.print(f"[yellow]No processing logs found for: {source_path}[/yellow]")
+            console.print("[dim]Note: Logs are only available for sources indexed after this feature was added.[/dim]")
+            return
+        
+        # Display source info
+        console.print(Panel(f"[bold]{source['source_type'].upper()}: {source_path}[/bold]\n"
+                          f"Status: {source['status']} | Indexed: {source['indexed_at']}", 
+                          title="Source Information"))
+        console.print()
+        
+        # Display logs in table
+        table = Table(title="Processing Log")
+        table.add_column("Step", style="cyan")
+        table.add_column("Status", style="bold")
+        table.add_column("Message", style="white")
+        table.add_column("Details", style="dim")
+        table.add_column("Time", style="dim")
+        
+        for log in logs:
+            # Color status
+            status = log['status']
+            if status == 'success':
+                status_str = f"[green]{status}[/green]"
+            elif status == 'failed':
+                status_str = f"[red]{status}[/red]"
+            elif status == 'warning':
+                status_str = f"[yellow]{status}[/yellow]"
+            else:
+                status_str = f"[dim]{status}[/dim]"
+            
+            # Format details
+            details_str = ""
+            if log.get('details'):
+                details = log['details']
+                if isinstance(details, dict):
+                    # Show key metrics
+                    key_items = []
+                    for k, v in details.items():
+                        if k == 'errors' and v:
+                            key_items.append(f"{k}: {len(v)} errors")
+                        elif isinstance(v, (int, float, str)) and not isinstance(v, bool):
+                            key_items.append(f"{k}: {v}")
+                    details_str = "\n".join(key_items[:3])  # Show max 3 items
+            
+            table.add_row(
+                log['step'],
+                status_str,
+                log.get('message', ''),
+                details_str,
+                log['timestamp'].split('.')[0] if log.get('timestamp') else ''
+            )
+        
+        console.print(table)
+        console.print()
+        
+        # Show errors if any
+        error_count = 0
+        for log in logs:
+            if log.get('details') and log['details'].get('errors'):
+                errors = log['details']['errors']
+                error_count += len(errors)
+                if errors:
+                    console.print(f"[bold red]Errors in {log['step']}:[/bold red]")
+                    for error in errors:
+                        console.print(f"  • {error}")
+                    console.print()
+        
+        # Summary
+        success_count = sum(1 for log in logs if log['status'] == 'success')
+        failed_count = sum(1 for log in logs if log['status'] == 'failed')
+        
+        console.print(f"[bold]Summary:[/bold] {success_count} successful, {failed_count} failed, {error_count} errors")
+        
+    except Exception as e:
+        console.print(f"[red]✗ Error viewing logs: {e}[/red]")
+        logger.error(f"Error viewing logs: {e}", exc_info=True)
+
+
+@cli.command()
+@click.argument('source_path')
 def remove(source_path):
     """Remove a source from the database."""
     console.print(f"[bold yellow]Removing source:[/bold yellow] {source_path}")

@@ -9,8 +9,8 @@ from typing import List, Dict, Any, Optional
 import logging
 import shutil
 
-import chromadb
-from chromadb.config import Settings
+import chromadb  # pyright: ignore[reportMissingImports]
+from chromadb.config import Settings  # pyright: ignore[reportMissingImports]
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +138,100 @@ class DatabaseManager:
         if workspace_path in self.databases:
             return self.databases[workspace_path]['sources']
         return []
+    
+    def get_enhanced_assets(self, workspace_path: str) -> List[Dict[str, Any]]:
+        """Get enhanced asset information with processing status."""
+        try:
+            db_info = self.databases.get(workspace_path)
+            if not db_info:
+                return []
+            
+            registry_path = db_info['registry_path']
+            conn = sqlite3.connect(registry_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Get sources with metadata
+            cursor.execute("""
+                SELECT s.id, s.source_type, s.source_path, s.indexed_at, 
+                       s.status, s.file_size, s.metadata
+                FROM sources s
+                ORDER BY s.indexed_at DESC
+            """)
+            
+            assets = []
+            for row in cursor.fetchall():
+                asset = dict(row)
+                
+                # Parse metadata
+                metadata = {}
+                if asset.get('metadata'):
+                    import json
+                    try:
+                        metadata = json.loads(asset['metadata'])
+                    except:
+                        pass
+                
+                # Get processing stats from logs
+                cursor.execute("""
+                    SELECT step, status, details
+                    FROM processing_logs
+                    WHERE source_id = ?
+                    ORDER BY timestamp DESC
+                """, (asset['id'],))
+                
+                logs = cursor.fetchall()
+                
+                # Analyze logs for status badges
+                text_chunks = metadata.get('text_chunks', 0)
+                schematic_chunks = metadata.get('schematic_chunks', 0)
+                
+                vision_success = False
+                vision_failed = False
+                has_schematics = schematic_chunks > 0
+                
+                for log in logs:
+                    if log['step'] == 'schematic_analysis':
+                        if log['status'] == 'success':
+                            vision_success = True
+                        elif log['status'] in ['failed', 'warning']:
+                            if log['details']:
+                                import json
+                                try:
+                                    details = json.loads(log['details'])
+                                    if details.get('analysis_failed', 0) > 0:
+                                        vision_failed = True
+                                except:
+                                    pass
+                
+                asset['text_chunks'] = text_chunks
+                asset['schematic_chunks'] = schematic_chunks
+                asset['vision_success'] = vision_success
+                asset['vision_failed'] = vision_failed
+                asset['has_schematics'] = has_schematics
+                assets.append(asset)
+            
+            conn.close()
+            return assets
+            
+        except Exception as e:
+            logger.error(f"Error getting enhanced assets: {e}")
+            return []
+    
+    def get_database_summary(self, workspace_path: str) -> Dict[str, Any]:
+        """Get compact database summary for list view."""
+        if workspace_path not in self.databases:
+            return {}
+        
+        db_info = self.databases[workspace_path]
+        return {
+            'name': db_info['workspace_name'],
+            'path': workspace_path,
+            'sources': db_info['sources_count'],
+            'documents': db_info['documents_count'],
+            'size_mb': db_info['size_mb'],
+            'status': db_info['status']
+        }
     
     def delete_source(self, workspace_path: str, source_path: str) -> bool:
         """
@@ -332,5 +426,54 @@ class DatabaseManager:
             stats['sources_by_type'][source_type] = stats['sources_by_type'].get(source_type, 0) + 1
         
         return stats
+    
+    def get_source_logs(self, workspace_path: str, source_path: str) -> List[Dict[str, Any]]:
+        """Get processing logs for a specific source."""
+        try:
+            db_info = self.databases.get(workspace_path)
+            if not db_info:
+                return []
+            
+            registry_path = db_info['registry_path']
+            
+            # Get source ID
+            conn = sqlite3.connect(registry_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT id FROM sources WHERE source_path = ?", (source_path,))
+            source_row = cursor.fetchone()
+            
+            if not source_row:
+                conn.close()
+                return []
+            
+            source_id = source_row['id']
+            
+            # Get processing logs
+            cursor.execute("""
+                SELECT step, status, message, details, timestamp
+                FROM processing_logs
+                WHERE source_id = ?
+                ORDER BY timestamp ASC
+            """, (source_id,))
+            
+            logs = []
+            for row in cursor.fetchall():
+                log = dict(row)
+                if log.get('details'):
+                    import json
+                    try:
+                        log['details'] = json.loads(log['details'])
+                    except:
+                        pass
+                logs.append(log)
+            
+            conn.close()
+            return logs
+            
+        except Exception as e:
+            logger.error(f"Error getting source logs: {e}")
+            return []
 
 

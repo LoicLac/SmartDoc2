@@ -101,21 +101,38 @@ class PDFIngestor(BaseIngestor):
         try:
             # Step 1: Extract text and tables with LlamaParse
             self.console.print("[bold blue]Step 1/3:[/bold blue] Extracting text and tables...")
-            text_chunks = self._extract_text(pdf_path)
+            text_chunks = self._extract_text(pdf_path, source_id)
             self.console.print(f"[green]✓ Extracted {len(text_chunks)} text chunks[/green]\n")
+            self.registry.log_processing_step(
+                source_id, "text_extraction", "success",
+                f"Extracted {len(text_chunks)} text chunks",
+                {"chunk_count": len(text_chunks), "method": "llamaparse" if self.parser else "fallback"}
+            )
             
             # Step 2: Extract and analyze images/schematics
             schematic_chunks = []
             if kwargs.get('analyze_schematics', True):
                 self.console.print("[bold blue]Step 2/3:[/bold blue] Analyzing schematics with Gemini Vision...")
-                schematic_chunks = self._extract_and_analyze_schematics(
+                schematic_chunks, schematic_stats = self._extract_and_analyze_schematics(
                     pdf_path,
                     source_id,
                     initial_query=kwargs.get('initial_query')
                 )
                 self.console.print(f"[green]✓ Analyzed {len(schematic_chunks)} schematics[/green]\n")
+                
+                # Log schematic analysis results
+                status = "success" if schematic_chunks else ("warning" if schematic_stats.get('images_found') else "skipped")
+                self.registry.log_processing_step(
+                    source_id, "schematic_analysis", status,
+                    f"Analyzed {schematic_stats.get('schematics_found', 0)} schematics, {len(schematic_chunks)} successful",
+                    schematic_stats
+                )
             else:
                 self.console.print("[dim]Step 2/3: Skipped (--no-schematics)[/dim]\n")
+                self.registry.log_processing_step(
+                    source_id, "schematic_analysis", "skipped",
+                    "Schematic analysis disabled by user"
+                )
             
             # Step 3: Store all chunks in ChromaDB
             self.console.print("[bold blue]Step 3/3:[/bold blue] Storing in database...")
@@ -146,7 +163,7 @@ class PDFIngestor(BaseIngestor):
             self.registry.update_status(str(pdf_path), 'failed', {'error': str(e)})
             raise
     
-    def _extract_text(self, pdf_path: Path) -> List[Dict[str, Any]]:
+    def _extract_text(self, pdf_path: Path, source_id: int = None) -> List[Dict[str, Any]]:
         """Extract text and tables from PDF."""
         chunks = []
         
@@ -257,21 +274,31 @@ class PDFIngestor(BaseIngestor):
         pdf_path: Path,
         source_id: int,
         initial_query: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        """Extract images and analyze schematics."""
+    ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """Extract images and analyze schematics. Returns (chunks, stats)."""
         chunks = []
+        stats = {
+            'images_found': 0,
+            'schematics_found': 0,
+            'analysis_successful': 0,
+            'analysis_failed': 0,
+            'analysis_cached': 0,
+            'errors': []
+        }
         
         try:
             # Extract images
             self.console.print(f"  [dim]Extracting images from PDF...[/dim]")
             images = self.image_extractor.extract_images_from_pdf(pdf_path)
+            stats['images_found'] = len(images)
             
             # Filter for likely schematics
             schematics = self.image_extractor.filter_schematic_images(images)
+            stats['schematics_found'] = len(schematics)
             
             if not schematics:
                 self.console.print(f"  [yellow]⚠ No schematics detected in PDF[/yellow]")
-                return chunks
+                return chunks, stats
             
             self.console.print(f"  [cyan]Found {len(schematics)} potential schematics[/cyan]")
             if initial_query:
@@ -292,8 +319,10 @@ class PDFIngestor(BaseIngestor):
                     # Using cached result
                     analysis = {
                         'description': cached['vision_result'],
-                        'cached': True
+                        'cached': True,
+                        'success': True
                     }
+                    stats['analysis_cached'] += 1
                 else:
                     # Analyze with Gemini Vision (can take 5-10 seconds per image)
                     analysis = self.vision_analyzer.analyze_schematic(
@@ -302,8 +331,10 @@ class PDFIngestor(BaseIngestor):
                         page_number=page_num
                     )
                     
-                    # Cache result
-                    if analysis['success']:
+                    # Track results
+                    if analysis.get('success'):
+                        stats['analysis_successful'] += 1
+                        # Cache result
                         self.registry.cache_vision_result(
                             source_id=source_id,
                             image_hash=img_hash,
@@ -311,6 +342,11 @@ class PDFIngestor(BaseIngestor):
                             vision_result=analysis['description'],
                             page_number=page_num
                         )
+                    else:
+                        stats['analysis_failed'] += 1
+                        error_msg = f"Page {page_num}: {analysis.get('error', 'Unknown error')}"
+                        stats['errors'].append(error_msg)
+                        logger.warning(f"Gemini analysis failed for page {page_num}: {analysis.get('error')}")
                 
                 # Create chunk for schematic
                 if analysis.get('description'):
@@ -325,9 +361,11 @@ class PDFIngestor(BaseIngestor):
                     })
             
         except Exception as e:
+            error_msg = f"Critical error: {str(e)}"
+            stats['errors'].append(error_msg)
             logger.error(f"Schematic analysis failed: {e}")
         
-        return chunks
+        return chunks, stats
     
     def _store_chunks(self, chunks: List[Dict[str, Any]], pdf_path: Path):
         """Store chunks in ChromaDB."""

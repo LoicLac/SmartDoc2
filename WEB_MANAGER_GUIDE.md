@@ -117,6 +117,52 @@ In the **Browse & Delete** and **Transfer Data** tabs, you need to specify row i
 - Use comma-separated values: `0,1,2`
 - Example: `0` = first source, `1` = second source, etc.
 
+## Viewing Processing Logs 📋
+
+**NEW FEATURE**: View detailed processing logs to diagnose indexing issues!
+
+### How to View Logs
+
+1. Go to **Browse & Delete** tab
+2. Select a workspace from dropdown
+3. Scroll down to **Processing Logs** section
+4. Enter the row number of the source (e.g., `0` for first row)
+5. Click **📋 View Logs**
+
+### What You'll See
+
+The logs show:
+- ✅ **Text Extraction**: LlamaParse/PyPDF2 results, chunk count
+- 🖼️ **Schematic Analysis**: Images found, Gemini Vision results, failures
+- 💾 **Database Storage**: Chunks stored
+- ❌ **Errors**: Specific error messages (e.g., "GEMINI_API_KEY not configured")
+
+### Common Issues You Can Diagnose
+
+**Problem: `schematic_chunks: 0` in metadata**
+
+Possible causes shown in logs:
+- No images found in PDF (`images_found: 0`)
+- Images filtered out (`images_found: 5, schematics_found: 0`)
+- Gemini Vision failed (`analysis_failed: 2`, check errors)
+- API key not configured (check error messages)
+
+**Problem: LlamaParse failed**
+
+Check logs for:
+- `text_extraction` step status
+- Fallback to PyPDF2 (`method: fallback`)
+- API key issues
+
+### Note About Logs
+
+⚠️ **Logs are only available for sources indexed after this feature was added.**
+
+To get logs for old sources:
+1. Delete the source using the delete button
+2. Re-index it using CLI: `smartdoc index-pdf "path/to/file.pdf"`
+3. View logs in the web UI
+
 ## Technical Details
 
 ### Database Discovery

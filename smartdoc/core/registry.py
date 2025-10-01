@@ -67,10 +67,25 @@ class Registry:
                 )
             """)
             
+            # Processing logs table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS processing_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_id INTEGER NOT NULL,
+                    step TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    message TEXT,
+                    details TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
+                )
+            """)
+            
             # Create indexes
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_source_type ON sources(source_type)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_source_path ON sources(source_path)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_image_hash ON schematic_cache(image_hash)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_log_source ON processing_logs(source_id)")
     
     def add_source(
         self, 
@@ -223,6 +238,54 @@ class Registry:
                 ORDER BY page_number, analyzed_at DESC
             """, (source_id,))
             return [dict(row) for row in cursor.fetchall()]
+    
+    def log_processing_step(
+        self,
+        source_id: int,
+        step: str,
+        status: str,
+        message: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Log a processing step for a source.
+        
+        Args:
+            source_id: Source ID
+            step: Step name (e.g., "text_extraction", "schematic_analysis")
+            status: Status (e.g., "success", "failed", "warning", "skipped")
+            message: Human-readable message
+            details: Additional details as dict
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO processing_logs (source_id, step, status, message, details)
+                VALUES (?, ?, ?, ?, ?)
+            """, (source_id, step, status, message, json.dumps(details or {})))
+    
+    def get_processing_logs(self, source_path: str) -> List[Dict[str, Any]]:
+        """Get all processing logs for a source."""
+        source = self.get_source(source_path)
+        if not source:
+            return []
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT step, status, message, details, timestamp
+                FROM processing_logs
+                WHERE source_id = ?
+                ORDER BY timestamp ASC
+            """, (source['id'],))
+            
+            logs = []
+            for row in cursor.fetchall():
+                log = dict(row)
+                if log['details']:
+                    log['details'] = json.loads(log['details'])
+                logs.append(log)
+            return logs
     
     def get_stats(self) -> Dict[str, Any]:
         """Get registry statistics."""
