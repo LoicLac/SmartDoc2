@@ -18,17 +18,24 @@ SmartDoc2 enables intelligent ingestion, indexing, and retrieval of technical do
 ## Architecture
 
 ```
+YourProject/
+├── .smartdoc_yourproject/  # Auto-created workspace (named after project folder)
+│   ├── .env                # API keys (auto-generated with placeholders)
+│   ├── pdfs/               # PDF storage
+│   ├── chroma_db/          # Persistent vector database
+│   ├── registry.db         # Source tracking & cache
+│   └── temp/               # Temporary files
+└── .cursorrules            # Cursor AI integration (optional)
+```
+
 SmartDoc2/
-├── smartdoc/              # Core application
-│   ├── core/              # Registry & ChromaDB manager
-│   ├── ingestion/         # PDF, GitHub, Web ingestors
-│   ├── vision/            # Gemini Vision integration
-│   └── query/             # Query engine & citation formatting
-├── data/
-│   ├── pdfs/              # Drop PDFs here
-│   ├── chroma_db/         # Persistent vector database
-│   └── temp/              # Temporary files
-└── .cursorrules           # Cursor AI integration
+├── smartdoc/               # Core application
+│   ├── core/               # Registry & ChromaDB manager
+│   ├── ingestion/          # PDF, GitHub, Web ingestors
+│   ├── vision/             # Gemini Vision integration
+│   ├── query/              # Query engine & citation formatting
+│   └── web/                # Web UI for multi-workspace management
+└── setup.py                # Installation
 ```
 
 ## Installation
@@ -44,74 +51,80 @@ pip install -r requirements.txt
 
 ### 2. Configure API Keys
 
-Create a `.env` file (copy from `.env.example`):
+**SmartDoc automatically creates `.smartdoc_{project_name}/.env` on first run!**
 
 ```bash
-# API Keys
-LLAMAPARSE_API_KEY=your_llamaparse_api_key_here
-GEMINI_API_KEY=your_gemini_api_key_here
+# Navigate to your project
+cd /path/to/your/project
 
-# Optional: GitHub Personal Access Token
-GITHUB_TOKEN=your_github_token_here
+# Run any smartdoc command (auto-creates workspace + .env with placeholders)
+smartdoc --help
+
+# Edit the auto-generated .env file
+nano .smartdoc_yourproject/.env  # Replace 'yourproject' with your folder name
+```
+
+**Add your API keys to the placeholders:**
+
+```bash
+GEMINI_API_KEY=your_gemini_api_key_here          # Required for vision
+LLAMAPARSE_API_KEY=your_llamaparse_api_key_here  # Optional (uses fallback)
+GITHUB_TOKEN=your_github_token_here              # Optional (for private repos)
 ```
 
 **Get API Keys:**
-- LlamaParse: https://cloud.llamaindex.ai/parse
 - Gemini: https://makersuite.google.com/app/apikey
-- GitHub: https://github.com/settings/tokens (optional, for higher rate limits)
+- LlamaParse: https://cloud.llamaindex.ai/parse (optional)
+- GitHub: https://github.com/settings/tokens (optional)
 
-### 3. Initialize Database
+### 3. That's It!
 
-```bash
-python -c "from smartdoc.core.registry import Registry; Registry()"
-python -c "from smartdoc.core.chroma_client import ChromaManager; ChromaManager()"
-```
+✅ **No manual initialization needed** - workspace auto-creates on first command
+✅ **Each project gets its own isolated workspace** - named `.smartdoc_{project_name}/`
+✅ **Git-ignored by default** - pattern `.smartdoc_*/` automatically excluded
 
 ## Usage
 
-### Command-Line Interface
+### Quick Start
 
 ```bash
-# Index a PDF
-smartdoc index pdf data/pdfs/arduino_nano_r4.pdf
+# Index sources
+smartdoc index-pdf .smartdoc_yourproject/pdfs/datasheet.pdf
+smartdoc fetch-repo https://github.com/username/library
+smartdoc web https://docs.example.com/api
 
-# Fetch GitHub repository
-smartdoc fetch repo https://github.com/FortySevenEffects/arduino_midi_library
+# Query with natural language
+smartdoc query "What are the SPI pins?"
 
-# Scrape web documentation
-smartdoc web https://docs.arduino.cc/hardware/nano-r4-wifi
-
-# Query the database
-smartdoc query "What are the SPI pins on Arduino Nano R4?"
-
-# List all sources
-smartdoc list sources
-
-# Get statistics
+# Manage database
+smartdoc list-sources
 smartdoc stats
-
-# Launch web-based database manager (view/manage multiple workspaces)
-smartdoc web-manager --root ~/Code
-
-# Reprocess schematic with new query context
-smartdoc reprocess schematic data/pdfs/nano_r4.pdf --page 24
+smartdoc web-manager
 ```
 
 ### Cursor Integration
 
-Add to your `.cursorrules`:
+Copy `.cursorrules` to your project for natural language commands:
 
-```markdown
-# SmartDoc Integration
-
-User can request documentation indexing with natural language:
-- "Index this PDF: [path]"
-- "Fetch the Arduino MIDI library from GitHub"
-- "Look up SPI configuration in the docs"
-
-When answering technical questions, always check SmartDoc database first.
-Cite sources: [nano_r4.pdf, p.23] or [github:arduino/MIDI/src/MIDI.cpp]
+```bash
+cp /path/to/SmartDoc2/.cursorrules /path/to/your/project/
 ```
+
+Now ask Cursor directly:
+- "Index this datasheet into SmartDoc"
+- "What are the I2C pins according to SmartDoc?"
+- "Show me SmartDoc sources"
+
+The AI automatically checks SmartDoc, cites sources, and handles schematic reprocessing.
+
+### 📖 Complete Usage Guide
+
+**See [USAGE.md](USAGE.md) for comprehensive documentation:**
+- Detailed CLI commands with examples
+- Advanced Cursor integration workflows
+- Batch operations and automation
+- Query filtering and optimization
+- Common workflows and best practices
 
 ## How It Works
 
@@ -163,14 +176,23 @@ Edit `smartdoc/config.py` to customize:
 smartdoc stats
 
 # List all indexed sources
-smartdoc list sources
+smartdoc list-sources
+
+# View detailed processing logs for a source
+smartdoc logs .smartdoc_yourproject/pdfs/your_file.pdf
 
 # Remove a source
-smartdoc remove source data/pdfs/old_file.pdf
+smartdoc remove .smartdoc_yourproject/pdfs/old_file.pdf
 
-# Reset entire database (⚠️ destructive!)
-smartdoc reset --confirm
+# Manage multiple workspaces via web UI
+smartdoc web-manager
 ```
+
+**Each project has its own isolated workspace:**
+- Database: `.smartdoc_{project_name}/chroma_db/`
+- Registry: `.smartdoc_{project_name}/registry.db`
+- To backup: Just copy the entire `.smartdoc_{project_name}/` folder
+- To reset: Delete the `.smartdoc_{project_name}/` folder
 
 ## File Size Handling
 
@@ -208,12 +230,21 @@ class CustomIngestor(BaseIngestor):
 ## Troubleshooting
 
 **ChromaDB not persisting:**
-- Check `data/chroma_db/` directory exists
-- Verify write permissions
+- Check `.smartdoc_{project_name}/chroma_db/` directory exists
+- Verify write permissions in workspace folder
 
 **API errors:**
-- Verify API keys in `.env`
+- Verify API keys in `.smartdoc_{project_name}/.env`
 - Check API rate limits
+- Ensure `.env` file has actual keys (not placeholders)
+
+**Database schema errors:**
+- Delete `.smartdoc_{project_name}/chroma_db/` and reindex sources
+
+**Processing failures:**
+- Use `smartdoc logs <source_path>` to see detailed error logs
+- Check that PDFs are not corrupted
+- Verify Gemini API key for schematic analysis
 
 **Large file warnings:**
 - Adjust `MAX_FILE_SIZE_WARNING` in `config.py`

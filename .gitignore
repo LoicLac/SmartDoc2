@@ -5,11 +5,12 @@ env/
 *.pyc
 __pycache__/
 
-# Data
-data/chroma_db/
-data/temp/
-*.db
-*.db-journal
+# SmartDoc Workspace (contains all data, .env, databases)
+# Pattern: .smartdoc_{project_name}/
+.smartdoc_*/
+
+# Legacy data folder (for backward compatibility)
+data/
 
 # IDE
 .vscode/

@@ -1,270 +1,109 @@
 # SmartDoc2 Integration Rules
 
 ## Overview
-SmartDoc2 is a LlamaIndex-powered documentation system that indexes PDFs, GitHub repositories, and web pages into a persistent ChromaDB vector database. It features intelligent schematic analysis using Gemini Vision and a modern web UI for multi-workspace management.
+SmartDoc2: LlamaIndex-powered docs system with ChromaDB, Gemini Vision schematic analysis, automatic reprocessing, and selective knowledge addition.
 
-## Available Commands
+## Command Mappings
 
-The user can invoke SmartDoc2 using natural language. When you detect these requests, translate them into the appropriate CLI commands:
+### Indexing
+- "Index PDF [path]" → `smartdoc index-pdf [path]`
+- "Fetch [github_url]" → `smartdoc fetch-repo [github_url]`
+- "Scrape [url]" → `smartdoc web [url]`
 
-### Indexing Commands
-- "Index this PDF: [path]" → `smartdoc index-pdf [path]`
-- "Index the datasheet at [path]" → `smartdoc index-pdf [path]`
-- "Fetch the [library] from GitHub" → `smartdoc fetch-repo [github_url]`
-- "Index [GitHub URL]" → `smartdoc fetch-repo [github_url]`
-- "Scrape [URL]" → `smartdoc web [url]`
-- "Index this Arduino documentation: [URL]" → `smartdoc web [url]`
+### Query
+- "What/Find [question]" → `smartdoc query "[question]"`
+- "Search in [source]" → `smartdoc query "[q]" --source [path]`
+- "Find code" → `smartdoc query "[q]" --type github`
+- Force reprocess → `smartdoc query "[q]" --reprocess`
 
-### Query Commands
-- "Search docs: [query]" → `smartdoc query "[query]"`
-- "What are the [technical question]?" → `smartdoc query "[question]"`
-- "Find information about [topic]" → `smartdoc query "[topic]"`
-- "Look up [topic] with reprocessing" → `smartdoc query "[topic]" --reprocess`
-- "Search only in [source]" → `smartdoc query "[query]" --source [path]`
-- "Find code examples" → `smartdoc query "[query]" --type github`
-
-### Management Commands
-- "List indexed sources" → `smartdoc list-sources`
-- "Show database stats" → `smartdoc stats`
+### Management
+- "List sources" → `smartdoc list-sources`
+- "Show stats" → `smartdoc stats`
 - "Remove [source]" → `smartdoc remove [source]`
-- "View logs for [source]" → `smartdoc logs [source]`
-- "Reset database" → `smartdoc reset` (⚠️ destructive!)
+- "View logs [source]" → `smartdoc logs [source]`
+- "Launch web UI" → `smartdoc web-manager`
 
-### Web UI Commands
-- "Launch web manager" → `smartdoc web-manager`
-- "Open database UI" → `smartdoc web-manager`
-- "Manage multiple databases" → `smartdoc web-manager`
+## Core Behavior
 
-## When to Use Which Interface
+### Query Strategy
+1. **Always check SmartDoc first** before using general knowledge
+2. **Use simple query**: `smartdoc query "[question]"` (no flags needed)
+3. **System auto-reprocesses** when:
+   - Confidence < 0.6
+   - Schematic terms detected (pin, SPI, I2C, UART, pinout, diagram, GPIO)
+   - Query about hardware/connections
+4. **Always cite sources** from SmartDoc results
 
-### Use CLI when:
-- Indexing new sources (faster, shows progress)
-- Quick queries from terminal
-- Scripting/automation
-- CI/CD integration
-- Single workspace operations
-
-### Use Web UI when:
-- Managing multiple workspaces/databases
-- Visual overview of all sources
-- Bulk operations (copy/move/delete assets)
-- Viewing processing logs visually
-- Comparing database statistics
-- Team collaboration (shared view)
-
-## Integration Guidelines
-
-### When User Asks Technical Questions
-
-1. **Check SmartDoc first** before using general knowledge
-2. Use: `smartdoc query "[user_question]"` 
-3. If confidence < 0.6 and query involves schematics/pinouts, suggest: `smartdoc query "[question]" --reprocess`
-4. Always cite sources in your response using the format returned by SmartDoc
+### Automatic Reprocessing
+- Expands to 10 results for schematic queries
+- Checks cache first (instant if cached)
+- Applies focused Gemini Vision analysis
+- Selectively adds high-value findings to database
+- Visual: `🔄 [Reprocessed]` or `💾 [Added to DB]`
 
 ### Response Format
-
-When answering from SmartDoc results:
 ```
-According to [nano_r4.pdf, p.23]: 
-SPI pins on Arduino Nano R4:
-- MOSI: D11
-- MISO: D12
-- SCK: D13
-- CS: D10
+According to [source.pdf, p.X]:
+[Technical answer with specifics]
 
-Source: Arduino Nano R4 Datasheet, page 23
+Source: [Full citation]
 ```
 
-### Confidence-Based Actions
+### Confidence Handling
+- **> 0.8**: Answer directly with citations
+- **0.6-0.8**: Answer with "Medium confidence - verify"
+- **< 0.6**: System auto-reprocesses; check improved answer
 
-- **Confidence > 0.8**: Provide answer directly with citations
-- **Confidence 0.6-0.8**: Provide answer but note: "Medium confidence - you may want to verify"
-- **Confidence < 0.6**: Suggest reprocessing with `--reprocess` flag or indexing additional sources
+### Progressive Learning
+- Database learns from queries (adds focused chunks)
+- Related queries benefit from previous analysis
+- Monitor with `smartdoc stats` (document count increases)
 
-### Schematic/Pinout Queries
+## Critical Rules
 
-For queries about:
-- Pin configurations (SPI, I2C, UART, GPIO)
-- Schematic diagrams
-- Wiring and connections
-- Voltage levels and power
+1. **Source Management**: Check `smartdoc list-sources` before re-indexing
+2. **Schematic Queries**: Trust automatic reprocessing (no `--reprocess` needed)
+3. **Debugging**: Use `smartdoc logs [source]` for indexing issues
+4. **Web UI**: Use for multi-workspace management (`smartdoc web-manager`)
+5. **Database Growth**: Expect intelligent growth (selective, not bloated)
 
-Always use `--reprocess` flag: `smartdoc query "[question]" --reprocess`
+## Interface Selection
 
-This triggers Gemini Vision to analyze relevant schematics with the specific query context.
+**CLI**: Indexing, quick queries, automation, single workspace
+**Web UI**: Multi-workspace, bulk ops, visual logs, team collaboration
 
-### Source Management
+## Essential Notes
 
-Before indexing, check if source already exists:
+- **Workspace**: `.smartdoc_{project_name}/` (dynamically named, git-ignored)
+  - Example: In "MyProject" → `.smartdoc_myproject/`
+- PDF folder: `.smartdoc_{project_name}/pdfs/`
+- Database: `.smartdoc_{project_name}/chroma_db/` (persistent, grows intelligently)
+- Registry: `.smartdoc_{project_name}/registry.db` (tracks sources + cached analysis)
+- API keys: `.smartdoc_{project_name}/.env` (auto-created with placeholders)
+- File limits: 5MB warning, 50MB prompt
+
+## Examples (Key Patterns)
+
+**Technical Query:**
 ```bash
-smartdoc list-sources
+smartdoc query "SPI pins Arduino Nano R4"
+# Auto-reprocesses → confidence 0.13 → 0.88
+# Adds focused chunks → future queries benefit
 ```
 
-If source needs updating, remove old version first:
+**Follow-up Query:**
 ```bash
-smartdoc remove [old_source_path]
-smartdoc index-pdf [new_source_path]
+smartdoc query "MOSI pin Arduino Nano R4"  
+# Uses focused chunks from previous → no reprocessing
 ```
-
-## Query Options Reference
-
-### Basic Query
-```bash
-smartdoc query "your question"
-```
-
-### Advanced Options
-- `--reprocess` - Reanalyze schematics with specific query context (for pinouts, wiring)
-- `--source [path]` - Search only in specific source (e.g., `--source "data/pdfs/nano_r4.pdf"`)
-- `--type [pdf|github|web]` - Filter by source type (e.g., `--type github` for code examples)
-
-### Combined Example
-```bash
-smartdoc query "SPI configuration" --type pdf --reprocess
-```
-
-## Troubleshooting with Logs
-
-When indexing fails or results are poor:
-
-1. **View processing logs:**
-```bash
-smartdoc logs [source_path]
-```
-
-2. **Check what went wrong:**
-- Text extraction status and chunk count
-- Vision analysis success/failure
-- Schematic detection results
-- Specific error messages
-
-3. **In Web UI:**
-- Navigate to Dashboard tab
-- Load the database
-- Select asset row
-- Click "📋 Logs" button
-
-## Examples
-
-### Example 1: PDF Indexing
-**User**: "Index the Arduino Nano R4 datasheet at data/pdfs/nano_r4.pdf"
-
-**Response**: Execute:
-```bash
-smartdoc index-pdf data/pdfs/nano_r4.pdf
-```
-
-### Example 2: Technical Query with Context
-**User**: "What are the SPI pins on the Arduino Nano R4?"
-
-**Response**: Execute:
-```bash
-smartdoc query "SPI pins Arduino Nano R4" --reprocess
-```
-Then provide answer with citations from the results.
-
-### Example 3: GitHub Repository
-**User**: "Fetch the Arduino MIDI library from GitHub"
-
-**Response**: Execute:
-```bash
-smartdoc fetch-repo https://github.com/FortySevenEffects/arduino_midi_library
-```
-
-### Example 4: Code Search
-**User**: "How do I send a MIDI note on message?"
-
-**Response**: Execute:
-```bash
-smartdoc query "MIDI send note on message" --type github
-```
-Then provide code example with citation.
-
-### Example 5: Debugging Failed Indexing
-**User**: "Why didn't the ESP32 datasheet index properly?"
-
-**Response**: Execute:
-```bash
-smartdoc logs "data/pdfs/esp32.pdf"
-```
-Then analyze the logs to identify issues (text extraction, vision analysis, etc.)
-
-### Example 6: Multi-Workspace Management
-**User**: "I need to organize my databases and copy some PDFs between projects"
-
-**Response**: Execute:
-```bash
-smartdoc web-manager
-```
-Then guide them through the Dashboard and Transfer tabs.
-
-## Web Manager UI Guide
-
-### Dashboard Tab
-- **Top table**: All databases with statistics
-- **Select database**: Enter row # and click "Load Database"
-- **Bottom table**: All assets in selected database with detailed status
-- **Actions**: Delete assets, view processing logs
-
-### Transfer & Copy Tab
-- **Split view**: Source (left) and Destination (right)
-- **Copy**: Duplicate assets to another database
-- **Move**: Transfer assets and remove from source
-- **Use row indices**: Select rows like "0,1,2"
-
-## Workspace-Specific Notes
-
-- PDF folder: `data/pdfs/` - User can drop PDFs here
-- Database: `data/chroma_db/` - Persistent across sessions
-- Registry: `data/registry.db` - Tracks all indexed sources
-- Multi-workspace: Web manager scans entire root directory for SmartDoc databases
-
-## Best Practices
-
-1. **Always cite sources** - Include file name and page number for PDFs, file path for code
-2. **Check confidence** - Suggest reprocessing or additional indexing if confidence is low
-3. **Be specific** - For technical queries, use exact terminology from datasheets
-4. **Version awareness** - Note which version/commit of code was indexed
-5. **Datasheet focus** - Prioritize datasheet information for hardware questions
-6. **Use logs for debugging** - When indexing fails, check logs before re-indexing
-7. **Organize with web UI** - For managing multiple projects, use web-manager
 
 ## Error Handling
 
-### If SmartDoc command fails:
-
-1. **Check API keys** (if using LlamaParse or Gemini Vision):
-   ```bash
-   # Verify .env file exists with:
-   # LLAMAPARSE_API_KEY=your_key
-   # GEMINI_API_KEY=your_key
-   ```
-
-2. **Verify source path/URL** is correct
-
-3. **Check file size limits** (warn at 5MB, prompt at 50MB for LlamaParse)
-
-4. **View processing logs** to diagnose:
-   ```bash
-   smartdoc logs [source_path]
-   ```
-
-5. **Check database health**:
-   ```bash
-   smartdoc stats
-   ```
-
-6. **If ChromaDB schema errors**:
-   - Backup current database
-   - Create fresh database (will auto-initialize on next index)
+1. Failed indexing → `smartdoc logs [source]`
+2. Low confidence → System auto-reprocesses
+3. ChromaDB schema error → Backup DB, recreate (auto-init on next index)
+4. No API key → Check .env file
+5. Reprocessing not adding → Check confidence boost > 0.3, query has technical terms
 
 ## Integration Status
-
-SmartDoc2 is active and ready to use. The database persists with this workspace, so all indexed documentation remains available across sessions. The web manager supports multi-workspace operations across the entire root directory.
-
-## MCP Server
-
-SmartDoc2 includes an MCP (Model Context Protocol) server for IDE integration:
-- File: `smartdoc_mcp_server.py`
-- Provides programmatic access to all SmartDoc functions
-- Used for AI assistant integrations
+Active. Database persists across sessions. Auto-learns from technical queries.
