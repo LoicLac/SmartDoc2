@@ -4,6 +4,7 @@ Command-line interface for SmartDoc2.
 
 import click
 import logging
+import os
 from pathlib import Path
 from rich.console import Console
 from rich.table import Table
@@ -24,6 +25,43 @@ logger = logging.getLogger(__name__)
 # Rich console for pretty output
 console = Console()
 
+# Config file for storing custom root path
+ROOT_CONFIG_FILE = Path.home() / ".smartdoc_root"
+
+
+def get_default_root() -> Path:
+    """Get the default root path for scanning workspaces."""
+    # Check if custom root is set
+    if ROOT_CONFIG_FILE.exists():
+        try:
+            custom_root = ROOT_CONFIG_FILE.read_text().strip()
+            custom_path = Path(custom_root).expanduser().resolve()
+            if custom_path.exists():
+                return custom_path
+        except Exception:
+            pass
+    
+    # Default to ~/Code
+    default_root = Path.home() / "Code"
+    return default_root
+
+
+def set_default_root(root_path: str) -> bool:
+    """Set the default root path for scanning workspaces."""
+    try:
+        root = Path(root_path).expanduser().resolve()
+        if not root.exists():
+            console.print(f"[bold red]✗ Directory does not exist:[/bold red] {root}")
+            return False
+        
+        ROOT_CONFIG_FILE.write_text(str(root))
+        console.print(f"[bold green]✓ Default root set to:[/bold green] {root}")
+        console.print(f"[dim]Stored in: {ROOT_CONFIG_FILE}[/dim]")
+        return True
+    except Exception as e:
+        console.print(f"[bold red]✗ Error:[/bold red] {e}")
+        return False
+
 
 @click.group()
 def cli():
@@ -34,29 +72,27 @@ def cli():
 @cli.command()
 @click.argument('pdf_path', type=click.Path(exists=True))
 @click.option('--no-schematics', is_flag=True, help='Skip schematic analysis')
-@click.option('--query', type=str, help='Initial query context for schematic analysis')
+@click.option('--query', type=str, help='Query context for better schematic analysis')
 def index_pdf(pdf_path, no_schematics, query):
-    """Index a PDF document."""
-    console.print(f"[bold blue]Indexing PDF:[/bold blue] {pdf_path}")
-    
+    """Index a PDF document (datasheet, manual, etc.)."""
     try:
+        console.print(f"[bold blue]Indexing PDF:[/bold blue] {pdf_path}")
+        
         registry = Registry()
         chroma = ChromaManager()
         ingestor = PDFIngestor(registry, chroma)
         
-        result = ingestor.ingest(
+        ingestor.ingest(
             pdf_path,
             analyze_schematics=not no_schematics,
-            initial_query=query
+            query_context=query
         )
         
-        console.print(f"[bold green]✓ Success![/bold green]")
-        console.print(f"  Chunks added: {result['chunks_added']}")
-        console.print(f"  Text chunks: {result['metadata']['text_chunks']}")
-        console.print(f"  Schematic chunks: {result['metadata']['schematic_chunks']}")
+        console.print(f"[bold green]✓ Successfully indexed:[/bold green] {pdf_path}")
         
     except Exception as e:
         console.print(f"[bold red]✗ Error:[/bold red] {e}")
+        logger.exception("Failed to index PDF")
         raise click.Abort()
 
 
@@ -64,27 +100,21 @@ def index_pdf(pdf_path, no_schematics, query):
 @click.argument('repo_url')
 @click.option('--branch', type=str, help='Branch to clone (default: main/master)')
 def fetch_repo(repo_url, branch):
-    """Fetch and index a GitHub repository."""
-    console.print(f"[bold blue]Fetching repository:[/bold blue] {repo_url}")
-    
+    """Clone and index a GitHub repository."""
     try:
+        console.print(f"[bold blue]Fetching repository:[/bold blue] {repo_url}")
+        
         registry = Registry()
         chroma = ChromaManager()
         ingestor = GitHubIngestor(registry, chroma)
         
-        kwargs = {}
-        if branch:
-            kwargs['branch'] = branch
+        ingestor.ingest(repo_url, branch=branch)
         
-        result = ingestor.ingest(repo_url, **kwargs)
-        
-        console.print(f"[bold green]✓ Success![/bold green]")
-        console.print(f"  Files processed: {result['files_processed']}")
-        console.print(f"  Chunks added: {result['chunks_added']}")
-        console.print(f"  Commit: {result['commit_sha'][:8]}")
+        console.print(f"[bold green]✓ Successfully indexed:[/bold green] {repo_url}")
         
     except Exception as e:
         console.print(f"[bold red]✗ Error:[/bold red] {e}")
+        logger.exception("Failed to fetch repository")
         raise click.Abort()
 
 
@@ -92,70 +122,58 @@ def fetch_repo(repo_url, branch):
 @click.argument('url')
 def web(url):
     """Scrape and index a web page."""
-    console.print(f"[bold blue]Scraping web page:[/bold blue] {url}")
-    
     try:
+        console.print(f"[bold blue]Scraping web page:[/bold blue] {url}")
+        
         registry = Registry()
         chroma = ChromaManager()
         ingestor = WebIngestor(registry, chroma)
         
-        result = ingestor.ingest(url)
+        ingestor.ingest(url)
         
-        console.print(f"[bold green]✓ Success![/bold green]")
-        console.print(f"  Title: {result['metadata'].get('title', 'N/A')}")
-        console.print(f"  Chunks added: {result['chunks_added']}")
+        console.print(f"[bold green]✓ Successfully indexed:[/bold green] {url}")
         
     except Exception as e:
         console.print(f"[bold red]✗ Error:[/bold red] {e}")
+        logger.exception("Failed to scrape web page")
         raise click.Abort()
 
 
 @cli.command()
 @click.argument('query_text')
 @click.option('--reprocess', is_flag=True, help='Automatically reprocess schematics if needed')
-@click.option('--source', type=str, help='Filter by source path/URL')
+@click.option('--source', type=str, help='Filter by source path')
 @click.option('--type', 'source_type', type=click.Choice(['pdf', 'github', 'web']), help='Filter by source type')
 def query(query_text, reprocess, source, source_type):
-    """Query the knowledge base."""
-    console.print(f"[bold blue]Querying:[/bold blue] {query_text}\n")
-    
+    """Query the documentation database."""
     try:
-        registry = Registry()
         chroma = ChromaManager()
-        engine = QueryEngine(registry, chroma)
+        registry = Registry()
+        engine = QueryEngine(chroma, registry)
         
+        # Build filter
+        filter_dict = {}
+        if source:
+            filter_dict['source'] = source
+        if source_type:
+            filter_dict['source_type'] = source_type
+        
+        # Query with or without reprocessing
         if reprocess:
-            results = engine.query_with_reprocess(query_text)
+            results = engine.query_with_reprocess(query_text, where=filter_dict if filter_dict else None)
         else:
-            results = engine.query(
-                query_text,
-                source_filter=source,
-                source_type_filter=source_type
-            )
+            results = engine.query(query_text, where=filter_dict if filter_dict else None)
         
         # Display results
-        console.print(f"[bold]Confidence:[/bold] {results['confidence']:.2f}")
-        console.print(f"[bold]Total Results:[/bold] {results['total_results']}\n")
-        
-        if results.get('should_reprocess'):
-            console.print(f"[yellow]⚠️  {results['reprocess_suggestion']}[/yellow]")
-            console.print("[yellow]Run with --reprocess flag to enable automatic reprocessing[/yellow]\n")
-        
-        if results.get('reprocessed'):
-            console.print("[green]🔄 Results enhanced with schematic reprocessing[/green]\n")
-        
-        # Display top results
-        for idx, result in enumerate(results['results'], 1):
-            console.print(f"[bold cyan]{idx}. {result['citation']}[/bold cyan]")
-            console.print(f"   Score: {result['score']:.2f}")
+        if results:
+            console.print(f"\n[bold]Query:[/bold] {query_text}\n")
+            console.print(engine.format_results(results))
+        else:
+            console.print("[yellow]No results found.[/yellow]")
             
-            content = result['content']
-            if len(content) > 300:
-                content = content[:300] + "..."
-            console.print(f"   {content}\n")
-        
     except Exception as e:
         console.print(f"[bold red]✗ Error:[/bold red] {e}")
+        logger.exception("Query failed")
         raise click.Abort()
 
 
@@ -169,35 +187,39 @@ def list_sources(source_type):
         if source_type == 'all':
             sources = registry.list_sources()
         else:
-            sources = registry.list_sources(source_type)
+            sources = registry.list_sources(source_type=source_type)
         
         if not sources:
-            console.print("[yellow]No sources found[/yellow]")
+            console.print("[yellow]No sources indexed yet.[/yellow]")
             return
         
         # Create table
-        table = Table(title="Indexed Sources")
+        table = Table(title=f"Indexed Sources ({len(sources)} total)")
+        table.add_column("#", style="dim")
         table.add_column("Type", style="cyan")
-        table.add_column("Source", style="white")
-        table.add_column("Status", style="green")
+        table.add_column("Source", style="green")
         table.add_column("Indexed", style="blue")
-        table.add_column("Size", style="magenta")
+        table.add_column("Status", style="yellow")
         
-        for source in sources:
-            size_str = f"{source['file_size'] / 1024 / 1024:.1f}MB" if source['file_size'] else "N/A"
+        for idx, source in enumerate(sources, 1):
+            source_type = source.get('source_type', 'unknown')
+            source_path = source.get('source_path', 'N/A')
+            indexed_at = source.get('indexed_at', 'N/A')
+            status = source.get('status', 'unknown')
+            
             table.add_row(
-                source['source_type'],
-                source['source_path'][:60] + "..." if len(source['source_path']) > 60 else source['source_path'],
-                source['status'],
-                source['indexed_at'],
-                size_str
+                str(idx),
+                source_type,
+                source_path,
+                indexed_at,
+                status
             )
         
         console.print(table)
-        console.print(f"\n[bold]Total sources:[/bold] {len(sources)}")
         
     except Exception as e:
         console.print(f"[bold red]✗ Error:[/bold red] {e}")
+        logger.exception("Failed to list sources")
         raise click.Abort()
 
 
@@ -208,228 +230,228 @@ def stats():
         registry = Registry()
         chroma = ChromaManager()
         
-        # Registry stats
-        reg_stats = registry.get_stats()
+        # Get stats
+        sources = registry.list_sources()
+        sources_by_type = {}
+        for source in sources:
+            stype = source.get('source_type', 'unknown')
+            sources_by_type[stype] = sources_by_type.get(stype, 0) + 1
         
         # ChromaDB stats
-        chroma_stats = chroma.get_stats()
+        try:
+            collection = chroma.get_collection()
+            doc_count = collection.count()
+        except:
+            doc_count = 0
         
-        console.print("[bold cyan]SmartDoc2 Statistics[/bold cyan]\n")
+        # Display stats
+        console.print("\n[bold]SmartDoc Workspace Statistics[/bold]")
+        console.print("=" * 80)
         
-        console.print("[bold]Registry:[/bold]")
-        console.print(f"  Total sources: {reg_stats['total_sources']}")
-        console.print(f"  Cached schematics: {reg_stats['cached_schematics']}")
+        console.print(f"\n[bold cyan]Registry:[/bold cyan]")
+        console.print(f"  Total sources: {len(sources)}")
+        console.print(f"  Sources by type:")
+        for stype, count in sources_by_type.items():
+            console.print(f"    {stype}: {count}")
         
-        if reg_stats['sources_by_type']:
-            console.print("\n  Sources by type:")
-            for source_type in reg_stats['sources_by_type']:
-                console.print(f"    {source_type['source_type']}: {source_type['count']}")
+        console.print(f"\n[bold cyan]ChromaDB:[/bold cyan]")
+        console.print(f"  Total documents: {doc_count}")
         
-        console.print(f"\n[bold]ChromaDB:[/bold]")
-        console.print(f"  Total documents: {chroma_stats['total_documents']}")
-        console.print(f"  Total sources: {chroma_stats['total_sources']}")
-        console.print(f"  Collection: {chroma_stats['collection_name']}")
-        
-        if chroma_stats.get('documents_by_type'):
-            console.print("\n  Documents by type:")
-            for doc_type, count in chroma_stats['documents_by_type'].items():
-                console.print(f"    {doc_type}: {count}")
+        console.print()
         
     except Exception as e:
         console.print(f"[bold red]✗ Error:[/bold red] {e}")
+        logger.exception("Failed to get stats")
         raise click.Abort()
 
 
 @cli.command()
 @click.argument('source_path')
 def logs(source_path):
-    """View processing logs for a source."""
-    from .core.registry import Registry
-    from .core.chroma_client import ChromaManager
-    from rich.table import Table
-    from rich.panel import Panel
-    
+    """Show processing logs for a source."""
     try:
         registry = Registry()
-        
-        # Get source info
-        source = registry.get_source(source_path)
-        if not source:
-            console.print(f"[red]✗ Source not found: {source_path}[/red]")
-            return
-        
-        # Get processing logs
         logs = registry.get_processing_logs(source_path)
         
         if not logs:
-            console.print(f"[yellow]No processing logs found for: {source_path}[/yellow]")
-            console.print("[dim]Note: Logs are only available for sources indexed after this feature was added.[/dim]")
+            console.print(f"[yellow]No logs found for:[/yellow] {source_path}")
             return
         
-        # Display source info
-        console.print(Panel(f"[bold]{source['source_type'].upper()}: {source_path}[/bold]\n"
-                          f"Status: {source['status']} | Indexed: {source['indexed_at']}", 
-                          title="Source Information"))
-        console.print()
-        
-        # Display logs in table
-        table = Table(title="Processing Log")
-        table.add_column("Step", style="cyan")
-        table.add_column("Status", style="bold")
-        table.add_column("Message", style="white")
-        table.add_column("Details", style="dim")
-        table.add_column("Time", style="dim")
+        console.print(f"\n[bold]Processing Logs:[/bold] {source_path}")
+        console.print("=" * 80)
         
         for log in logs:
-            # Color status
-            status = log['status']
-            if status == 'success':
-                status_str = f"[green]{status}[/green]"
-            elif status == 'failed':
-                status_str = f"[red]{status}[/red]"
-            elif status == 'warning':
-                status_str = f"[yellow]{status}[/yellow]"
-            else:
-                status_str = f"[dim]{status}[/dim]"
+            # Status emoji
+            status_emoji = {
+                'success': '✓',
+                'warning': '⚠',
+                'failed': '✗',
+                'info': 'ℹ'
+            }.get(log['status'], '•')
             
-            # Format details
-            details_str = ""
-            if log.get('details'):
-                details = log['details']
-                if isinstance(details, dict):
-                    # Show key metrics
-                    key_items = []
-                    for k, v in details.items():
-                        if k == 'errors' and v:
-                            key_items.append(f"{k}: {len(v)} errors")
-                        elif isinstance(v, (int, float, str)) and not isinstance(v, bool):
-                            key_items.append(f"{k}: {v}")
-                    details_str = "\n".join(key_items[:3])  # Show max 3 items
+            # Timestamp
+            timestamp = log.get('timestamp', 'N/A')
             
-            table.add_row(
-                log['step'],
-                status_str,
-                log.get('message', ''),
-                details_str,
-                log['timestamp'].split('.')[0] if log.get('timestamp') else ''
-            )
+            # Step name
+            step = log.get('step', 'unknown').upper()
+            
+            # Status
+            status = log.get('status', 'unknown').upper()
+            
+            console.print(f"\n[bold][{timestamp}] {step}[/bold]")
+            console.print(f"Status: {status_emoji} {status}")
+            
+            # Message
+            message = log.get('message')
+            if message:
+                console.print(f"Message: {message}")
+            
+            # Details
+            details = log.get('details')
+            if details:
+                import json
+                try:
+                    details_dict = json.loads(details) if isinstance(details, str) else details
+                    console.print("Details:")
+                    for key, value in details_dict.items():
+                        console.print(f"  - {key}: {value}")
+                except:
+                    console.print(f"Details: {details}")
         
-        console.print(table)
         console.print()
-        
-        # Show errors if any
-        error_count = 0
-        for log in logs:
-            if log.get('details') and log['details'].get('errors'):
-                errors = log['details']['errors']
-                error_count += len(errors)
-                if errors:
-                    console.print(f"[bold red]Errors in {log['step']}:[/bold red]")
-                    for error in errors:
-                        console.print(f"  • {error}")
-                    console.print()
-        
-        # Summary
-        success_count = sum(1 for log in logs if log['status'] == 'success')
-        failed_count = sum(1 for log in logs if log['status'] == 'failed')
-        
-        console.print(f"[bold]Summary:[/bold] {success_count} successful, {failed_count} failed, {error_count} errors")
         
     except Exception as e:
-        console.print(f"[red]✗ Error viewing logs: {e}[/red]")
-        logger.error(f"Error viewing logs: {e}", exc_info=True)
+        console.print(f"[bold red]✗ Error:[/bold red] {e}")
+        logger.exception("Failed to get logs")
+        raise click.Abort()
 
 
 @cli.command()
 @click.argument('source_path')
 def remove(source_path):
     """Remove a source from the database."""
-    console.print(f"[bold yellow]Removing source:[/bold yellow] {source_path}")
-    
     try:
+        console.print(f"[bold yellow]Removing source:[/bold yellow] {source_path}")
+        
+        # Confirm
+        if not click.confirm("Are you sure? This will delete all associated documents."):
+            console.print("[dim]Cancelled.[/dim]")
+            return
+        
         registry = Registry()
         chroma = ChromaManager()
         
-        # Check if source exists
-        source = registry.get_source(source_path)
-        if not source:
-            console.print("[bold red]✗ Source not found[/bold red]")
+        # Get source info
+        sources = registry.list_sources()
+        source_info = None
+        for s in sources:
+            if s['source_path'] == source_path:
+                source_info = s
+                break
+        
+        if not source_info:
+            console.print(f"[bold red]✗ Source not found:[/bold red] {source_path}")
             return
         
-        # Confirm
-        if not click.confirm("Are you sure you want to remove this source?"):
-            console.print("Cancelled")
-            return
+        # Delete from ChromaDB
+        try:
+            collection = chroma.get_collection()
+            results = collection.get(where={"source": source_path})
+            if results['ids']:
+                collection.delete(ids=results['ids'])
+                console.print(f"[green]✓ Deleted {len(results['ids'])} documents from ChromaDB[/green]")
+        except Exception as e:
+            console.print(f"[yellow]⚠ Warning: Could not delete from ChromaDB: {e}[/yellow]")
         
-        # Remove from ChromaDB
-        chroma.delete_source(source_path)
+        # Delete from registry
+        registry.remove_source(source_path)
         
-        # Remove from registry
-        registry.delete_source(source_path)
-        
-        console.print("[bold green]✓ Source removed[/bold green]")
+        console.print(f"[bold green]✓ Successfully removed:[/bold green] {source_path}")
         
     except Exception as e:
         console.print(f"[bold red]✗ Error:[/bold red] {e}")
+        logger.exception("Failed to remove source")
         raise click.Abort()
 
 
 @cli.command()
 @click.option('--confirm', is_flag=True, help='Confirm reset without prompting')
 def reset(confirm):
-    """Reset the entire database (⚠️  destructive!)."""
-    console.print("[bold red]⚠️  WARNING: This will delete ALL indexed data![/bold red]")
-    
-    if not confirm:
-        if not click.confirm("Are you ABSOLUTELY sure?"):
-            console.print("Cancelled")
-            return
-    
+    """Reset the entire database (⚠️ destructive!)."""
     try:
-        registry = Registry()
-        chroma = ChromaManager()
+        if not confirm:
+            console.print("[bold red]⚠️  WARNING: This will delete ALL indexed data![/bold red]")
+            if not click.confirm("Are you absolutely sure?"):
+                console.print("[dim]Cancelled.[/dim]")
+                return
         
-        # Reset ChromaDB
-        chroma.reset_collection()
-        
-        # Delete registry database
-        import os
         from .config import REGISTRY_DB
-        if os.path.exists(REGISTRY_DB):
-            os.remove(REGISTRY_DB)
         
-        # Reinitialize
-        registry = Registry()
+        # Delete registry
+        registry_path = Path(REGISTRY_DB)
+        if registry_path.exists():
+            os.remove(registry_path)
+            console.print("[green]✓ Deleted registry database[/green]")
         
+        # Reset ChromaDB (will be recreated on next use)
         console.print("[bold green]✓ Database reset complete[/bold green]")
+        console.print("[dim]Run any index command to recreate the database[/dim]")
         
     except Exception as e:
         console.print(f"[bold red]✗ Error:[/bold red] {e}")
+        logger.exception("Failed to reset database")
         raise click.Abort()
 
 
 @cli.command()
-@click.option('--root', type=click.Path(exists=True), default=None, help='Root directory to scan (default: parent of current workspace)')
+@click.argument('root_path')
+def set_root(root_path):
+    """Set the default root directory for web-manager scanning."""
+    if set_default_root(root_path):
+        console.print(f"\n[dim]Use 'smartdoc web-manager' to scan workspaces in: {Path(root_path).expanduser().resolve()}[/dim]")
+    else:
+        raise click.Abort()
+
+
+@cli.command()
+def show_root():
+    """Show the current default root directory."""
+    root = get_default_root()
+    if ROOT_CONFIG_FILE.exists():
+        console.print(f"[bold]Custom root:[/bold] {root}")
+        console.print(f"[dim]Stored in: {ROOT_CONFIG_FILE}[/dim]")
+    else:
+        console.print(f"[bold]Default root:[/bold] {root}")
+        console.print(f"[dim]Set custom root with: smartdoc set-root <path>[/dim]")
+
+
+@cli.command()
+@click.option('--root', type=click.Path(exists=True), default=None, help='Root directory to scan (overrides default)')
 @click.option('--port', type=int, default=7860, help='Port to run server on')
 @click.option('--share', is_flag=True, help='Create public share link')
 def web_manager(root, port, share):
     """Launch web-based database manager to view and manage multiple SmartDoc databases."""
-    from pathlib import Path
+    # Suppress verbose logging from httpx and gradio
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("gradio").setLevel(logging.WARNING)
+    
+    # Disable Gradio analytics and telemetry
+    os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"
+    os.environ["GRADIO_SERVER_NAME"] = "127.0.0.1"
     
     # Determine root path
     if root:
         root_path = Path(root).resolve()
     else:
-        # Default to parent of current workspace (e.g., ~/Code if workspace is ~/Code/SmartDoc2)
-        from .config import BASE_DIR
-        root_path = BASE_DIR.parent
+        root_path = get_default_root()
     
-    console.print(f"[bold blue]🌐 Launching SmartDoc Database Manager[/bold blue]")
-    console.print(f"[bold]Root directory:[/bold] {root_path}")
-    console.print(f"[bold]Server:[/bold] http://localhost:{port}")
+    console.print(f"\n[bold blue]🌐 SmartDoc Database Manager[/bold blue]")
+    console.print(f"[dim]Root:[/dim] {root_path}")
+    console.print(f"[dim]Server:[/dim] http://127.0.0.1:{port}\n")
     
     if not root_path.exists():
         console.print(f"[bold red]✗ Root directory does not exist:[/bold red] {root_path}")
+        console.print(f"[dim]Set a valid root with: smartdoc set-root <path>[/dim]")
         raise click.Abort()
     
     try:
@@ -451,4 +473,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

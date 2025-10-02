@@ -5,6 +5,7 @@ Configuration settings for SmartDoc2.
 import os
 import sys
 import warnings
+import sqlite3
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -35,6 +36,61 @@ WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
 PDFS_DIR.mkdir(parents=True, exist_ok=True)
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Registry Database path
+REGISTRY_DB = str(WORKSPACE_DIR / "registry.db")
+
+# Auto-initialize empty registry database if it doesn't exist
+# This allows web-manager to discover empty workspaces
+if not Path(REGISTRY_DB).exists():
+    conn = sqlite3.connect(REGISTRY_DB)
+    cursor = conn.cursor()
+    
+    # Sources table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_type TEXT NOT NULL,
+            source_path TEXT NOT NULL UNIQUE,
+            indexed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            file_size INTEGER,
+            status TEXT DEFAULT 'pending',
+            metadata TEXT,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    # Schematic cache table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS schematic_cache (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id INTEGER NOT NULL,
+            image_hash TEXT NOT NULL,
+            page_number INTEGER,
+            last_query TEXT,
+            vision_result TEXT,
+            analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE,
+            UNIQUE(image_hash, last_query)
+        )
+    """)
+    
+    # Processing logs table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS processing_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id INTEGER NOT NULL,
+            step TEXT NOT NULL,
+            status TEXT NOT NULL,
+            message TEXT,
+            details TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
+        )
+    """)
+    
+    conn.commit()
+    conn.close()
 
 # Auto-create .env file in workspace if it doesn't exist
 ENV_FILE = WORKSPACE_DIR / ".env"
@@ -141,9 +197,6 @@ GITHUB_EXCLUDE_DIRS = ["node_modules", ".git", "build", "dist", "venv", "__pycac
 # PDF Settings
 PDF_DPI = 300  # For image extraction
 SUPPORTED_IMAGE_FORMATS = [".png", ".jpg", ".jpeg", ".gif", ".bmp"]
-
-# Registry Database
-REGISTRY_DB = str(WORKSPACE_DIR / "registry.db")
 
 # Vision Settings
 GEMINI_MODEL = "gemini-2.5-pro"  # Gemini 2.5 Pro (stable, released June 2025)

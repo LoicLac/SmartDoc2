@@ -31,42 +31,60 @@ class DatabaseManager:
     def discover_databases(self) -> List[Dict[str, Any]]:
         """
         Scan root directory for SmartDoc databases.
+        Searches for .smartdoc_* directories containing registry.db and chroma_db/.
         
         Returns:
             List of database info dicts
         """
         self.databases = {}
-        logger.info(f"Scanning for databases in: {self.root_path}")
+        logger.info(f"Scanning for .smartdoc_* databases in: {self.root_path}")
+        
+        found_workspaces = []
         
         for root, dirs, files in os.walk(self.root_path):
-            # Skip hidden directories and common ignore patterns
-            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', 'venv', '__pycache__']]
-            
             root_path = Path(root)
             
-            # Look for data/registry.db pattern
-            if root_path.name == 'data' and (root_path / 'registry.db').exists():
-                chroma_path = root_path / 'chroma_db'
-                if chroma_path.exists():
-                    workspace_path = root_path.parent
-                    workspace_name = workspace_path.name
+            # Look for .smartdoc_* directories in current level
+            for dir_name in dirs:
+                if dir_name.startswith('.smartdoc_'):
+                    workspace_dir = root_path / dir_name
+                    registry_path = workspace_dir / 'registry.db'
+                    chroma_path = workspace_dir / 'chroma_db'
                     
-                    db_info = self._get_database_info(workspace_path, workspace_name)
-                    self.databases[str(workspace_path)] = db_info
+                    if registry_path.exists() and chroma_path.exists():
+                        # Project is the parent directory
+                        project_path = root_path
+                        project_name = project_path.name
+                        
+                        logger.info(f"Found workspace: {project_name} at {workspace_dir}")
+                        found_workspaces.append((workspace_dir, project_path, project_name))
+                        
+                        db_info = self._get_database_info(workspace_dir, project_path, project_name)
+                        # Use project path as key
+                        self.databases[str(project_path)] = db_info
+            
+            # Filter directories for next iteration
+            # Skip hidden dirs (except .smartdoc_*) and common patterns
+            dirs[:] = [d for d in dirs 
+                      if (not d.startswith('.') or d.startswith('.smartdoc_'))
+                      and d not in ['node_modules', 'venv', '__pycache__', '.git']]
         
-        logger.info(f"Found {len(self.databases)} SmartDoc databases")
+        logger.info(f"Discovery complete: found {len(self.databases)} SmartDoc database(s)")
+        if not self.databases:
+            logger.warning(f"No .smartdoc_* workspaces found in {self.root_path}")
+            logger.warning("Make sure you have indexed some sources in your projects")
+        
         return list(self.databases.values())
     
-    def _get_database_info(self, workspace_path: Path, workspace_name: str) -> Dict[str, Any]:
-        """Get detailed information about a database."""
-        data_path = workspace_path / 'data'
-        registry_path = data_path / 'registry.db'
-        chroma_path = data_path / 'chroma_db'
+    def _get_database_info(self, workspace_dir: Path, project_path: Path, project_name: str) -> Dict[str, Any]:
+        """Get detailed information about a SmartDoc workspace."""
+        registry_path = workspace_dir / 'registry.db'
+        chroma_path = workspace_dir / 'chroma_db'
         
         info = {
-            'workspace_name': workspace_name,
-            'workspace_path': str(workspace_path),
-            'data_path': str(data_path),
+            'workspace_name': project_name,
+            'workspace_path': str(project_path),
+            'data_path': str(workspace_dir),
             'registry_path': str(registry_path),
             'chroma_path': str(chroma_path),
             'sources_count': 0,
@@ -110,12 +128,12 @@ class DatabaseManager:
                 collection = client.get_collection(name="smartdoc_workspace")
                 info['documents_count'] = collection.count()
             except Exception as e:
-                logger.warning(f"Could not read ChromaDB for {workspace_name}: {e}")
+                logger.warning(f"Could not read ChromaDB for {project_name}: {e}")
                 info['documents_count'] = 0
             
             # Calculate size
             total_size = 0
-            for root, dirs, files in os.walk(data_path):
+            for root, dirs, files in os.walk(workspace_dir):
                 for f in files:
                     fp = Path(root) / f
                     if fp.exists():
@@ -125,7 +143,7 @@ class DatabaseManager:
             info['status'] = 'healthy'
             
         except Exception as e:
-            logger.error(f"Error reading database {workspace_name}: {e}")
+            logger.error(f"Error reading database {project_name}: {e}")
             info['status'] = f'error: {str(e)}'
         
         return info
@@ -475,5 +493,3 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting source logs: {e}")
             return []
-
-
