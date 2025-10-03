@@ -149,20 +149,14 @@ def query(query_text, reprocess, source, source_type):
     try:
         chroma = ChromaManager()
         registry = Registry()
-        engine = QueryEngine(chroma, registry)
+        engine = QueryEngine(registry, chroma)
         
-        # Build filter
-        filter_dict = {}
-        if source:
-            filter_dict['source'] = source
-        if source_type:
-            filter_dict['source_type'] = source_type
-        
-        # Query with or without reprocessing
-        if reprocess:
-            results = engine.query_with_reprocess(query_text, where=filter_dict if filter_dict else None)
-        else:
-            results = engine.query(query_text, where=filter_dict if filter_dict else None)
+        # Query with filters
+        results = engine.query(
+            query_text,
+            source_filter=source,
+            source_type_filter=source_type
+        )
         
         # Display results
         if results:

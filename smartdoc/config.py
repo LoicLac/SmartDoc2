@@ -7,7 +7,7 @@ import sys
 import warnings
 import sqlite3
 from pathlib import Path
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # pyright: ignore[reportMissingImports]
 
 # Suppress noisy SSL warnings from urllib3
 warnings.filterwarnings('ignore', message='urllib3 v2 only supports OpenSSL')
@@ -43,54 +43,59 @@ REGISTRY_DB = str(WORKSPACE_DIR / "registry.db")
 # Auto-initialize empty registry database if it doesn't exist
 # This allows web-manager to discover empty workspaces
 if not Path(REGISTRY_DB).exists():
-    conn = sqlite3.connect(REGISTRY_DB)
-    cursor = conn.cursor()
-    
-    # Sources table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS sources (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            source_type TEXT NOT NULL,
-            source_path TEXT NOT NULL UNIQUE,
-            indexed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            file_size INTEGER,
-            status TEXT DEFAULT 'pending',
-            metadata TEXT,
-            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    # Schematic cache table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS schematic_cache (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            source_id INTEGER NOT NULL,
-            image_hash TEXT NOT NULL,
-            page_number INTEGER,
-            last_query TEXT,
-            vision_result TEXT,
-            analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE,
-            UNIQUE(image_hash, last_query)
-        )
-    """)
-    
-    # Processing logs table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS processing_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            source_id INTEGER NOT NULL,
-            step TEXT NOT NULL,
-            status TEXT NOT NULL,
-            message TEXT,
-            details TEXT,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
-        )
-    """)
-    
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(REGISTRY_DB)
+        cursor = conn.cursor()
+        
+        # Sources table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_type TEXT NOT NULL,
+                source_path TEXT NOT NULL UNIQUE,
+                indexed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                file_size INTEGER,
+                status TEXT DEFAULT 'pending',
+                metadata TEXT,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Schematic cache table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS schematic_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id INTEGER NOT NULL,
+                image_hash TEXT NOT NULL,
+                page_number INTEGER,
+                last_query TEXT,
+                vision_result TEXT,
+                analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE,
+                UNIQUE(image_hash, last_query)
+            )
+        """)
+        
+        # Processing logs table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS processing_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id INTEGER NOT NULL,
+                step TEXT NOT NULL,
+                status TEXT NOT NULL,
+                message TEXT,
+                details TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
+            )
+        """)
+        
+        conn.commit()
+    except sqlite3.Error as e:
+        print(f"⚠️  Failed to initialize registry database: {e}", file=sys.stderr)
+    finally:
+        if 'conn' in locals():
+            conn.close()
 
 # Auto-create .env file in workspace if it doesn't exist
 ENV_FILE = WORKSPACE_DIR / ".env"

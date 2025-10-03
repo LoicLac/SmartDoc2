@@ -92,6 +92,62 @@ class QueryEngine:
         
         return response
     
+    def format_results(self, results: Dict[str, Any]) -> str:
+        """
+        Format query results for console display.
+        
+        Args:
+            results: Query results dictionary
+        
+        Returns:
+            Formatted string for console output
+        """
+        output_parts = []
+        
+        # Confidence indicator
+        confidence = results.get('confidence', 0.0)
+        if confidence > 0.8:
+            confidence_str = f"🟢 High confidence ({confidence:.2f})"
+        elif confidence > 0.6:
+            confidence_str = f"🟡 Medium confidence ({confidence:.2f})"
+        else:
+            confidence_str = f"🔴 Low confidence ({confidence:.2f})"
+        
+        output_parts.append(f"**{confidence_str}**\n")
+        
+        # Reprocess suggestion
+        if results.get('should_reprocess'):
+            output_parts.append(f"💡 *{results.get('reprocess_suggestion', 'Consider reprocessing')}*\n")
+        
+        # Results
+        query_results = results.get('results', [])
+        if not query_results:
+            output_parts.append("*No results found.*")
+            return "\n".join(output_parts)
+        
+        output_parts.append(f"**Found {len(query_results)} result(s):**\n")
+        
+        for idx, result in enumerate(query_results[:5], 1):
+            content = result.get('content', '').strip()
+            citation = result.get('citation', 'Unknown source')
+            score = result.get('score', 0.0)
+            
+            # Truncate long content
+            if len(content) > 300:
+                content = content[:297] + "..."
+            
+            # Check if reprocessed
+            reprocessed_mark = ""
+            if result.get('reprocessed'):
+                reprocessed_mark = " 🔄"
+            if result.get('added_to_db'):
+                reprocessed_mark += " 💾"
+            
+            output_parts.append(f"\n**{idx}. {citation}**{reprocessed_mark} *(score: {score:.2f})*")
+            output_parts.append(f"{content}\n")
+        
+        return "\n".join(output_parts)
+    
     def query_with_reprocess(self, query_text: str) -> Dict[str, Any]:
         """
         Query with automatic schematic reprocessing if needed.

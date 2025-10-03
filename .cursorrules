@@ -14,7 +14,6 @@ SmartDoc2: LlamaIndex-powered docs system with ChromaDB, Gemini Vision schematic
 - "What/Find [question]" → `smartdoc query "[question]"`
 - "Search in [source]" → `smartdoc query "[q]" --source [path]`
 - "Find code" → `smartdoc query "[q]" --type github`
-- Force reprocess → `smartdoc query "[q]" --reprocess`
 
 ### Management
 - "List sources" → `smartdoc list-sources`
@@ -22,6 +21,8 @@ SmartDoc2: LlamaIndex-powered docs system with ChromaDB, Gemini Vision schematic
 - "Remove [source]" → `smartdoc remove [source]`
 - "View logs [source]" → `smartdoc logs [source]`
 - "Launch web UI" → `smartdoc web-manager`
+- "Set web UI root" → `smartdoc set-root [path]` (default: ~/Code)
+- "Show web UI root" → `smartdoc show-root`
 
 ## Core Behavior
 
@@ -62,10 +63,11 @@ Source: [Full citation]
 ## Critical Rules
 
 1. **Source Management**: Check `smartdoc list-sources` before re-indexing
-2. **Schematic Queries**: Trust automatic reprocessing (no `--reprocess` needed)
+2. **Schematic Queries**: System auto-reprocesses when confidence < 0.6 or schematic terms detected
 3. **Debugging**: Use `smartdoc logs [source]` for indexing issues
-4. **Web UI**: Use for multi-workspace management (`smartdoc web-manager`)
+4. **Web UI**: Use for multi-workspace management (`smartdoc web-manager`, default root: ~/Code)
 5. **Database Growth**: Expect intelligent growth (selective, not bloated)
+6. **Empty Workspaces**: Registry.db auto-initializes, making workspaces visible to web-manager
 
 ## Interface Selection
 
@@ -100,10 +102,11 @@ smartdoc query "MOSI pin Arduino Nano R4"
 ## Error Handling
 
 1. Failed indexing → `smartdoc logs [source]`
-2. Low confidence → System auto-reprocesses
-3. ChromaDB schema error → Backup DB, recreate (auto-init on next index)
-4. No API key → Check .env file
+2. Low confidence → System auto-reprocesses (confidence < 0.6)
+3. ChromaDB schema error → Backup DB, delete chroma_db/, auto-recreates on next command
+4. No API key → Check `.smartdoc_{project}/.env` file
 5. Reprocessing not adding → Check confidence boost > 0.3, query has technical terms
+6. Empty workspace not visible in web-manager → Registry auto-initializes on any command
 
 ## Integration Status
 Active. Database persists across sessions. Auto-learns from technical queries.
